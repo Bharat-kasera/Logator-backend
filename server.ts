@@ -11,17 +11,31 @@ dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);
+
+// Get allowed origins from environment or use defaults
+const allowedOrigins = [
+  "http://localhost:5173", // Local development
+  "http://localhost:3000", // Alternative local port
+  process.env.FRONTEND_URL, // Production frontend URL
+].filter(Boolean); // Remove undefined values
+
 const io = new Server(httpServer, {
   cors: {
-    origin: "http://localhost:5173", // Vite dev server
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
+    credentials: true,
   },
 });
 
 const PORT = process.env.PORT || 4001;
 
 // Middlewares
-app.use(cors());
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+  })
+);
 app.use(bodyParser.json({ limit: "10mb" })); // Increase limit for base64 images
 app.use(bodyParser.urlencoded({ extended: true }));
 
