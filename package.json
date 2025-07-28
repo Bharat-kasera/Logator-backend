@@ -7,7 +7,8 @@
     "dev": "nodemon --exec ts-node server.ts",
     "build": "tsc",
     "clean": "rm -rf dist",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "vercel-build": "npm run clean && npm run build"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -18,7 +19,8 @@
     "pg": "^8.16.3",
     "qrcode.react": "^4.2.0",
     "socket.io": "^4.7.4",
-    "twilio": "^5.8.0"
+    "twilio": "^5.8.0",
+    "typescript": "^5.3.3"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
@@ -27,7 +29,6 @@
     "@types/node": "^20.10.6",
     "@types/pg": "^8.10.1",
     "nodemon": "^3.0.2",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.3.3"
+    "ts-node": "^10.9.2"
   }
 }

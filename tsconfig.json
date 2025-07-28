@@ -12,22 +12,11 @@
     "forceConsistentCasingInFileNames": true,
     "moduleResolution": "node",
     "resolveJsonModule": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
+    "sourceMap": false,
+    "declaration": false,
     "typeRoots": ["./node_modules/@types"],
-    "types": ["node"],
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true
+    "types": ["node"]
   },
-  "include": [
-    "**/*.ts",
-    "types/**/*",
-    "services/**/*",
-    "routes/**/*",
-    "middleware/**/*",
-    "utils/**/*",
-    "components/**/*"
-  ],
+  "include": ["**/*.ts"],
   "exclude": ["node_modules", "dist", "**/*.js"]
 }
