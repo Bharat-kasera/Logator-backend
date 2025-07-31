@@ -104,7 +104,17 @@ CREATE TABLE checkin (
 CREATE TABLE face_ids (
   id SERIAL PRIMARY KEY,
   user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-  encoding TEXT -- JSON or comma-separated vector
+  encoding TEXT, -- JSON or comma-separated vector
+  verification_count INTEGER DEFAULT 0,
+  is_verified BOOLEAN DEFAULT FALSE,
+  verified_by_1 INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  verified_by_2 INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  verified_by_3 INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  verified_by_4 INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  verified_by_5 INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id)
 );
 
 -- Table for pending mapping requests (gate or department)

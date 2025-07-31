@@ -77,6 +77,12 @@ app.use(bodyParser.urlencoded({ extended: true }));
 // JWT Auth Middleware
 app.use("/api", authMiddleware);
 
+// Import Socket.IO setter and setup
+import { setSocketIO } from "./routes/api";
+
+// Set Socket.IO instance for API routes
+setSocketIO(io);
+
 // Mount API routes
 app.use("/api", apiRoutes);
 
@@ -95,14 +101,38 @@ app.get("/api/test", (req, res) => {
   });
 });
 
+// Store user socket mappings
+const userSockets = new Map<number, string>();
+
 // Socket.IO connection handling
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
+  // Handle user authentication and socket mapping
+  socket.on("authenticate", (data) => {
+    if (data.userId) {
+      userSockets.set(data.userId, socket.id);
+      socket.join(`user_${data.userId}`);
+      console.log(`User ${data.userId} authenticated with socket ${socket.id}`);
+    }
+  });
+
+  // Handle disconnection
   socket.on("disconnect", () => {
+    // Remove user from socket mapping
+    for (const [userId, socketId] of userSockets.entries()) {
+      if (socketId === socket.id) {
+        userSockets.delete(userId);
+        console.log(`User ${userId} disconnected`);
+        break;
+      }
+    }
     console.log("User disconnected:", socket.id);
   });
 });
+
+// Export io for use in other modules
+export { io };
 
 // Start server
 httpServer.listen(PORT, () => {

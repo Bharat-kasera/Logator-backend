@@ -16,7 +16,7 @@ router.get(
       const userId = req.user?.id;
       console.log("Fetching establishments for user id:", userId);
       const establishments = await knex("establishments")
-        .select("id", "name", "logo")
+        .select("id", "name", "logo", "plan", "address1", "address2", "pincode", "gst_number", "pan_number", "latitude", "longitude", "created_at")
         .where("user_id", userId);
       console.log("Establishments fetched:", establishments);
       res.json(establishments);

@@ -40,10 +40,13 @@ router.get(
     try {
       const result = await knex("gates").where({ establishment_id });
       res.json(result as Gate[]);
-    } catch (err: any) {
+    } catch (err: unknown) {
       res
         .status(500)
-        .json({ message: "Error fetching gates", error: err.message });
+        .json({ 
+          message: "Error fetching gates", 
+          error: err instanceof Error ? err.message : 'Unknown error' 
+        });
     }
   }
 );
@@ -52,7 +55,7 @@ router.get(
 router.post(
   "/",
   async (
-    req: Request<{}, any, CreateGateRequest>,
+    req: Request<{}, {}, CreateGateRequest>,
     res: Response
   ): Promise<void> => {
     const {
@@ -96,7 +99,7 @@ router.post(
       // Plan-based restrictions: Basic plan (1) allows limited gates
       let gateLimit = Infinity;
       if (establishmentPlan === 1) {
-        gateLimit = 2; // Basic plan allows 2 gates
+        gateLimit = 1; // Basic plan allows only 1 gate
       }
 
       if (currentCount >= gateLimit) {
@@ -127,10 +130,13 @@ router.post(
         longitude,
         radius,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       res
         .status(500)
-        .json({ message: "Error adding gate", error: err.message });
+        .json({ 
+          message: "Error adding gate", 
+          error: err instanceof Error ? err.message : 'Unknown error' 
+        });
     }
   }
 );
@@ -139,7 +145,7 @@ router.post(
 router.put(
   "/:id",
   async (
-    req: Request<{ id: string }, any, UpdateGateRequest>,
+    req: Request<{ id: string }, {}, UpdateGateRequest>,
     res: Response
   ): Promise<void> => {
     const { id } = req.params;
@@ -150,10 +156,13 @@ router.put(
         .where({ id })
         .update({ name, geofencing, latitude, longitude, radius });
       res.json({ success: true });
-    } catch (err: any) {
+    } catch (err: unknown) {
       res
         .status(500)
-        .json({ message: "Error updating gate", error: err.message });
+        .json({ 
+          message: "Error updating gate", 
+          error: err instanceof Error ? err.message : 'Unknown error' 
+        });
     }
   }
 );
@@ -167,10 +176,13 @@ router.delete(
     try {
       await knex("gates").where({ id }).del();
       res.json({ success: true });
-    } catch (err: any) {
+    } catch (err: unknown) {
       res
         .status(500)
-        .json({ message: "Error deleting gate", error: err.message });
+        .json({ 
+          message: "Error deleting gate", 
+          error: err instanceof Error ? err.message : 'Unknown error' 
+        });
     }
   }
 );

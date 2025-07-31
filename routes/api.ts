@@ -1,6 +1,7 @@
 import express from "express";
 import { Pool } from "pg";
 import dotenv from "dotenv";
+import { Server } from "socket.io";
 
 dotenv.config();
 
@@ -8,6 +9,9 @@ const router = express.Router();
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL!,
 });
+
+// Socket.IO instance will be injected
+let io: Server;
 
 // Import individual route modules
 import registerRoutes from "./register";
@@ -21,7 +25,7 @@ import userDepartmentMapRoutes from "./user_department_map";
 
 // Get pending invitations for logged-in user
 router.get(
-  "/notifications/user",
+  "/requests/pending",
   async (req: express.Request, res: express.Response): Promise<void> => {
     try {
       const userId = req.user?.id;
@@ -31,37 +35,39 @@ router.get(
         return;
       }
 
-      // Fetch pending invitations for this user
+      // Fetch pending invitations for this user (both gate and department)
       const pendingInvites = await pool.query(
         `
         SELECT 
-          pr.gate_dept_id,
-          pr.type,
+          pr.id,
+          pr.gate_id,
+          pr.department_id,
+          pr.status,
           pr.created_at,
           pr.establishment_id,
           e.name as establishment_name,
+          g.name as gate_name,
+          d.name as department_name,
+          e.user_id as owner_id,
           CASE 
-            WHEN pr.type = 'D' THEN d.name
-            WHEN pr.type = 'G' THEN g.name
-          END as target_name,
-          u.firstname as invited_by_firstname,
-          u.lastname as invited_by_lastname
+            WHEN pr.gate_id IS NOT NULL THEN 'gate'
+            WHEN pr.department_id IS NOT NULL THEN 'department'
+          END as invitation_type
         FROM pending_request pr
-        LEFT JOIN establishments e ON pr.establishment_id = e.id
-        LEFT JOIN departments d ON pr.type = 'D' AND pr.gate_dept_id = d.id
-        LEFT JOIN gates g ON pr.type = 'G' AND pr.gate_dept_id = g.id
-        LEFT JOIN users u ON e.user_id = u.id
-        WHERE pr.user_id = $1
+        JOIN establishments e ON pr.establishment_id = e.id
+        LEFT JOIN gates g ON pr.gate_id = g.id
+        LEFT JOIN departments d ON pr.department_id = d.id
+        WHERE pr.recipient_id = $1 AND pr.status = 'pending'
         ORDER BY pr.created_at DESC
       `,
         [userId]
       );
 
-      res.json({ invitations: pendingInvites.rows });
+      res.json({ requests: pendingInvites.rows });
     } catch (err: any) {
       console.error(err);
       res.status(500).json({
-        message: "Failed to fetch user notifications",
+        message: "Failed to fetch pending requests",
         error: err.message,
       });
     }
@@ -70,70 +76,71 @@ router.get(
 
 // Accept or decline invitation
 router.post(
-  "/notifications/user/respond",
+  "/requests/:requestId/respond",
   async (req: express.Request, res: express.Response): Promise<void> => {
     try {
       const userId = req.user?.id;
-      const { gate_dept_id, type, establishment_id, action } = req.body;
+      const { requestId } = req.params;
+      const { response } = req.body;
 
       if (!userId) {
         res.status(401).json({ message: "Unauthorized: user id missing" });
         return;
       }
 
-      if (!gate_dept_id || !type || !establishment_id || !action) {
+      if (!response || !["accept", "decline"].includes(response)) {
         res.status(400).json({
-          message:
-            "gate_dept_id, type, establishment_id, and action are required",
+          message: "response must be 'accept' or 'decline'",
         });
         return;
       }
 
-      if (!["accept", "decline"].includes(action)) {
-        res
-          .status(400)
-          .json({ message: "action must be 'accept' or 'decline'" });
-        return;
-      }
-
-      // Check if invitation exists
-      const invitationCheck = await pool.query(
-        "SELECT * FROM pending_request WHERE user_id = $1 AND gate_dept_id = $2 AND type = $3 AND establishment_id = $4",
-        [userId, gate_dept_id, type, establishment_id]
+      // Check if invitation exists and belongs to this user
+      const invitationResult = await pool.query(
+        "SELECT * FROM pending_request WHERE id = $1 AND recipient_id = $2 AND status = 'pending'",
+        [requestId, userId]
       );
 
-      if (invitationCheck.rows.length === 0) {
-        res.status(404).json({ message: "Invitation not found" });
+      if (invitationResult.rows.length === 0) {
+        res.status(404).json({ message: "Invitation not found or already processed" });
         return;
       }
 
-      if (action === "accept") {
-        // Create mapping based on type
-        if (type === "D") {
-          // Add to user_department_map
-          await pool.query(
-            "INSERT INTO user_department_map (department_id, user_id, status) VALUES ($1, $2, 1) ON CONFLICT (department_id, user_id) DO UPDATE SET status = 1",
-            [gate_dept_id, userId]
-          );
-        } else if (type === "G") {
-          // Add to user_gate_map
+      const invitation = invitationResult.rows[0];
+
+      if (response === "accept") {
+        // Check if it's a gate or department invitation and create appropriate mapping
+        if (invitation.gate_id) {
+          // Gate invitation - create mapping in user_gate_map
           await pool.query(
             "INSERT INTO user_gate_map (gate_id, user_id, status) VALUES ($1, $2, 1) ON CONFLICT (gate_id, user_id) DO UPDATE SET status = 1",
-            [gate_dept_id, userId]
+            [invitation.gate_id, userId]
+          );
+        } else if (invitation.department_id) {
+          // Department invitation - create mapping in user_department_map
+          await pool.query(
+            "INSERT INTO user_department_map (department_id, user_id, status) VALUES ($1, $2, 1) ON CONFLICT (department_id, user_id) DO UPDATE SET status = 1",
+            [invitation.department_id, userId]
           );
         }
+        
+        // Update request status to accepted
+        await pool.query(
+          "UPDATE pending_request SET status = 'accepted', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
+          [requestId]
+        );
+      } else {
+        // Update request status to declined
+      await pool.query(
+          "UPDATE pending_request SET status = 'declined', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
+          [requestId]
+      );
       }
 
-      // Remove from pending_request
-      await pool.query(
-        "DELETE FROM pending_request WHERE user_id = $1 AND gate_dept_id = $2 AND type = $3 AND establishment_id = $4",
-        [userId, gate_dept_id, type, establishment_id]
-      );
-
       res.json({
-        message: `Invitation ${action}ed successfully`,
-        action,
-        type: type === "D" ? "department" : "gate",
+        message: `Invitation ${response}${response === "accept" ? "ed" : "d"} successfully`,
+        response,
+        requestId
       });
     } catch (err: any) {
       console.error(err);
@@ -159,28 +166,24 @@ router.get(
         return;
       }
 
-      // Fetch sent invitations for establishments owned by this user
+      // Fetch sent invitations for establishments owned by this user (all statuses for admin view)
       const sentInvites = await pool.query(
         `
         SELECT 
-          pr.gate_dept_id,
-          pr.type,
+          pr.gate_id,
+          pr.status,
           pr.created_at,
           pr.establishment_id,
-          pr.user_id as invited_user_id,
+          pr.recipient_id as invited_user_id,
           e.name as establishment_name,
-          CASE 
-            WHEN pr.type = 'D' THEN d.name
-            WHEN pr.type = 'G' THEN g.name
-          END as target_name,
+          g.name as gate_name,
           u.firstname as invited_user_firstname,
           u.lastname as invited_user_lastname,
           u.phone as invited_user_phone
         FROM pending_request pr
         LEFT JOIN establishments e ON pr.establishment_id = e.id
-        LEFT JOIN departments d ON pr.type = 'D' AND pr.gate_dept_id = d.id
-        LEFT JOIN gates g ON pr.type = 'G' AND pr.gate_dept_id = g.id
-        LEFT JOIN users u ON pr.user_id = u.id
+        LEFT JOIN gates g ON pr.gate_id = g.id
+        LEFT JOIN users u ON pr.recipient_id = u.id
         WHERE e.user_id = $1
         ORDER BY pr.created_at DESC
       `,
@@ -204,7 +207,7 @@ router.delete(
   async (req: express.Request, res: express.Response): Promise<void> => {
     try {
       const userId = req.user?.id;
-      const { gate_dept_id, type, establishment_id, invited_user_id } =
+      const { gate_id, establishment_id, invited_user_id } =
         req.body;
 
       if (!userId) {
@@ -212,10 +215,10 @@ router.delete(
         return;
       }
 
-      if (!gate_dept_id || !type || !establishment_id || !invited_user_id) {
+      if (!gate_id || !establishment_id || !invited_user_id) {
         res.status(400).json({
           message:
-            "gate_dept_id, type, establishment_id, and invited_user_id are required",
+            "gate_id, establishment_id, and invited_user_id are required",
         });
         return;
       }
@@ -236,8 +239,8 @@ router.delete(
 
       // Delete the pending invitation
       const deleteResult = await pool.query(
-        "DELETE FROM pending_request WHERE user_id = $1 AND gate_dept_id = $2 AND type = $3 AND establishment_id = $4",
-        [invited_user_id, gate_dept_id, type, establishment_id]
+        "DELETE FROM pending_request WHERE recipient_id = $1 AND gate_id = $2 AND establishment_id = $3",
+        [invited_user_id, gate_id, establishment_id]
       );
 
       if (deleteResult.rowCount === 0) {
@@ -351,11 +354,12 @@ router.get(
       // Get user and their face verification count
       const userCheck = await pool.query(
         `
-        SELECT u.id, u.firstname, u.lastname, COUNT(f.id) as verification_count
+        SELECT u.id, u.firstname, u.lastname, u.photo_url,
+               COALESCE(f.verification_count, 0) as verification_count,
+               COALESCE(f.is_verified, false) as is_verified
         FROM users u
         LEFT JOIN face_ids f ON u.id = f.user_id
         WHERE u.phone = $1
-        GROUP BY u.id, u.firstname, u.lastname
       `,
         [phone]
       );
@@ -372,9 +376,11 @@ router.get(
           firstname: user.firstname,
           lastname: user.lastname,
           phone: phone,
+          photo_url: user.photo_url,
         },
         verificationCount: parseInt(user.verification_count),
-        needsVerification: parseInt(user.verification_count) < 5,
+        isVerified: user.is_verified,
+        needsVerification: !user.is_verified && parseInt(user.verification_count) < 5,
       });
     } catch (err: any) {
       console.error(err);
@@ -398,9 +404,9 @@ router.get(
         return;
       }
 
-      // Fetch pending requests for this user
+      // Fetch pending requests for this user (only pending status)
       const pendingRequestsResult = await pool.query(
-        "SELECT pr.*, u.firstname, u.lastname, e.name as establishment_name FROM pending_request pr LEFT JOIN users u ON pr.user_id = u.id LEFT JOIN establishments e ON pr.establishment_id = e.id WHERE pr.user_id = $1 OR e.user_id = $1",
+        "SELECT pr.*, u.firstname, u.lastname, e.name as establishment_name FROM pending_request pr LEFT JOIN users u ON pr.recipient_id = u.id LEFT JOIN establishments e ON pr.establishment_id = e.id WHERE (pr.recipient_id = $1 OR e.user_id = $1) AND pr.status = 'pending'",
         [userId]
       );
 
@@ -434,68 +440,602 @@ router.get(
   }
 );
 
-// User invitation endpoint for mappings
+// Visitor Management System Endpoints
+
+// Check-in a visitor
 router.post(
-  "/invite-user",
+  "/visitors/checkin",
   async (req: express.Request, res: express.Response): Promise<void> => {
     try {
-      const requesterId = req.user?.id;
-      const { user_id, type, target_id, establishment_id } = req.body;
+      const receptionistId = req.user?.id;
+      const { phone, gateId, visitorName, toMeet, establishmentId, departmentId, photo } = req.body;
 
-      if (!requesterId) {
+      if (!receptionistId) {
         res.status(401).json({ message: "Unauthorized: user id missing" });
         return;
       }
 
-      if (!user_id || !type || !target_id || !establishment_id) {
-        res.status(400).json({
-          message:
-            "user_id, type, target_id, and establishment_id are required",
-        });
+      if (!phone || !gateId || !establishmentId) {
+        res.status(400).json({ message: "phone, gateId, and establishmentId are required" });
         return;
       }
 
-      if (type !== "D" && type !== "G") {
-        res
-          .status(400)
-          .json({ message: "type must be 'D' for department or 'G' for gate" });
-        return;
+      // Parse phone number
+      const phoneStr = phone as string;
+      let country_code = "";
+      let phoneNumber = "";
+
+      if (phoneStr.includes(" ")) {
+        [country_code, phoneNumber] = phoneStr.split(" ");
+      } else {
+        country_code = "+91";
+        phoneNumber = phoneStr;
       }
 
-      // Check if requester owns the establishment
-      const establishmentCheck = await pool.query(
-        "SELECT id FROM establishments WHERE id = $1 AND user_id = $2",
-        [establishment_id, requesterId]
+      // Check if user exists, if not create them
+      let visitorResult = await pool.query(
+        "SELECT id FROM users WHERE country_code = $1 AND phone = $2",
+        [country_code, phoneNumber]
       );
 
-      if (establishmentCheck.rows.length === 0) {
-        res.status(403).json({
-          message:
-            "You don't have permission to invite users to this establishment",
+      let visitorId;
+      if (visitorResult.rows.length === 0) {
+        // Create new visitor
+        const insertResult = await pool.query(
+          "INSERT INTO users (phone, country_code, firstname, photo_url) VALUES ($1, $2, $3, $4) RETURNING id",
+          [phoneNumber, country_code, visitorName || "Guest", photo || null]
+        );
+        visitorId = insertResult.rows[0].id;
+      } else {
+        visitorId = visitorResult.rows[0].id;
+      }
+
+      // Create face_id record if photo is provided
+      if (photo) {
+        await pool.query(
+          "INSERT INTO face_ids (user_id, encoding) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+          [visitorId, photo] // Store photo URL as encoding for now
+        );
+      }
+
+      // Create check-in record
+      const checkinResult = await pool.query(
+        `INSERT INTO checkin (establishment_id, department_id, visitor_id, to_meet, 
+         checkin_user_id, checkin_gate_id, date_of_entry) 
+         VALUES ($1, $2, $3, $4, $5, $6, CURRENT_DATE) RETURNING id`,
+        [establishmentId, departmentId || null, visitorId, toMeet || null, receptionistId, gateId]
+      );
+
+      res.json({
+        message: "Visitor checked in successfully",
+        checkinId: checkinResult.rows[0].id,
+        visitorId
+      });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({
+        message: "Failed to check in visitor",
+        error: err.message,
+      });
+    }
+  }
+);
+
+// Get active checked-in visitors
+router.get(
+  "/visitors/active/:establishmentId",
+  async (req: express.Request, res: express.Response): Promise<void> => {
+    try {
+      const { establishmentId } = req.params;
+      
+      const activeVisitors = await pool.query(
+        `
+        SELECT 
+          c.id as checkin_id,
+          c.check_in_at,
+          c.to_meet,
+          u.id as visitor_id,
+          u.firstname,
+          u.lastname,
+          u.phone,
+          u.country_code,
+          g.name as gate_name
+        FROM checkin c
+        JOIN users u ON c.visitor_id = u.id
+        JOIN gates g ON c.checkin_gate_id = g.id
+        WHERE c.establishment_id = $1 AND c.check_out_at IS NULL
+        ORDER BY c.check_in_at DESC
+      `,
+        [establishmentId]
+      );
+
+      res.json({ activeVisitors: activeVisitors.rows });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({
+        message: "Failed to fetch active visitors",
+        error: err.message,
+      });
+    }
+  }
+);
+
+// Check-out a visitor
+router.put(
+  "/visitors/:checkinId/checkout",
+  async (req: express.Request, res: express.Response): Promise<void> => {
+    try {
+      const receptionistId = req.user?.id;
+      const { checkinId } = req.params;
+      const { gateId } = req.body;
+
+      if (!receptionistId) {
+        res.status(401).json({ message: "Unauthorized: user id missing" });
+        return;
+      }
+
+      const result = await pool.query(
+        "UPDATE checkin SET check_out_at = CURRENT_TIMESTAMP, checkout_user_id = $1, checkout_gate_id = $2 WHERE id = $3 AND check_out_at IS NULL RETURNING id",
+        [receptionistId, gateId || null, checkinId]
+      );
+
+      if (result.rows.length === 0) {
+        res.status(404).json({ message: "Check-in record not found or already checked out" });
+        return;
+      }
+
+      res.json({ message: "Visitor checked out successfully" });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({
+        message: "Failed to check out visitor",
+        error: err.message,
+      });
+    }
+  }
+);
+
+// Reverse checkout (undo checkout)
+router.put(
+  "/visitors/:checkinId/reverse-checkout",
+  async (req: express.Request, res: express.Response): Promise<void> => {
+    try {
+      const { checkinId } = req.params;
+
+      const result = await pool.query(
+        "UPDATE checkin SET check_out_at = NULL, checkout_user_id = NULL, checkout_gate_id = NULL WHERE id = $1 AND check_out_at IS NOT NULL RETURNING id",
+        [checkinId]
+      );
+
+      if (result.rows.length === 0) {
+        res.status(404).json({ message: "Check-in record not found or not checked out" });
+        return;
+      }
+
+      res.json({ message: "Checkout reversed successfully" });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({
+        message: "Failed to reverse checkout",
+        error: err.message,
+      });
+    }
+  }
+);
+
+// Archive visitor record (move from checkin to visitor_logs)
+router.post(
+  "/visitors/:checkinId/archive",
+  async (req: express.Request, res: express.Response): Promise<void> => {
+    try {
+      const { checkinId } = req.params;
+
+      // Start transaction
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        // Get the complete checkin record
+        const checkinResult = await client.query(
+          "SELECT * FROM checkin WHERE id = $1",
+          [checkinId]
+        );
+
+        if (checkinResult.rows.length === 0) {
+          await client.query('ROLLBACK');
+          res.status(404).json({ message: "Check-in record not found" });
+          return;
+        }
+
+        const checkin = checkinResult.rows[0];
+
+        // Insert into visitor_logs
+        await client.query(
+          `INSERT INTO visitor_logs (establishment_id, department_id, visitor_id, to_meet, 
+           check_in_at, check_out_at, date_of_entry, checkin_user_id, checkout_user_id, 
+           checkin_gate_id, checkout_gate_id) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [
+            checkin.establishment_id,
+            checkin.department_id,
+            checkin.visitor_id,
+            checkin.to_meet,
+            checkin.check_in_at,
+            checkin.check_out_at,
+            checkin.date_of_entry,
+            checkin.checkin_user_id,
+            checkin.checkout_user_id,
+            checkin.checkin_gate_id,
+            checkin.checkout_gate_id
+          ]
+        );
+
+        // Delete from checkin table
+        await client.query("DELETE FROM checkin WHERE id = $1", [checkinId]);
+
+        await client.query('COMMIT');
+        res.json({ message: "Visitor record archived successfully" });
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({
+        message: "Failed to archive visitor record",
+        error: err.message,
+      });
+    }
+  }
+);
+
+// Record face verification
+router.post(
+  "/visitors/verify-face",
+  async (req: express.Request, res: express.Response): Promise<void> => {
+    try {
+      const receptionistId = req.user?.id;
+      const { visitorId, similarity } = req.body;
+
+      if (!receptionistId || !visitorId) {
+        res.status(400).json({ message: "visitorId is required" });
+        return;
+      }
+
+      // Get current verification status
+      const currentVerification = await pool.query(
+        "SELECT verification_count, verified_by_1, verified_by_2, verified_by_3, verified_by_4, verified_by_5 FROM face_ids WHERE user_id = $1",
+        [visitorId]
+      );
+
+      let count = 0;
+      let updateFields = [];
+      let updateValues = [visitorId];
+
+      if (currentVerification.rows.length > 0) {
+        count = currentVerification.rows[0].verification_count;
+        const row = currentVerification.rows[0];
+        
+        // Check if this receptionist has already verified this user
+        if ([row.verified_by_1, row.verified_by_2, row.verified_by_3, row.verified_by_4, row.verified_by_5].includes(receptionistId)) {
+          res.json({ message: "Face already verified by this receptionist" });
+          return;
+        }
+      }
+
+      if (count < 5) {
+        count++;
+        const columnName = `verified_by_${count}`;
+        updateFields.push(`${columnName} = $${updateValues.length + 1}`);
+        updateValues.push(receptionistId);
+        
+        updateFields.push(`verification_count = $${updateValues.length + 1}`);
+        updateValues.push(count);
+        
+        if (count >= 5) {
+          updateFields.push(`is_verified = $${updateValues.length + 1}`);
+          updateValues.push(true);
+        }
+        
+        updateFields.push(`updated_at = CURRENT_TIMESTAMP`);
+
+        await pool.query(
+          `INSERT INTO face_ids (user_id, verification_count, ${`verified_by_${count}`}, is_verified, updated_at) 
+           VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+           ON CONFLICT (user_id) DO UPDATE SET ${updateFields.join(', ')}`,
+          currentVerification.rows.length === 0 
+            ? [visitorId, count, receptionistId, count >= 5]
+            : updateValues
+        );
+      }
+
+      res.json({ message: "Face verification recorded successfully" });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({
+        message: "Failed to record face verification",
+        error: err.message,
+      });
+    }
+  }
+);
+
+// Get recently checked-out visitors (for checked-out tab)
+router.get(
+  "/visitors/checked-out/:establishmentId",
+  async (req: express.Request, res: express.Response): Promise<void> => {
+    try {
+      const { establishmentId } = req.params;
+      
+      const checkedOutVisitors = await pool.query(
+        `
+        SELECT 
+          c.id as checkin_id,
+          c.check_in_at,
+          c.check_out_at,
+          c.to_meet,
+          u.id as visitor_id,
+          u.firstname,
+          u.lastname,
+          u.phone,
+          u.country_code,
+          g1.name as checkin_gate_name,
+          g2.name as checkout_gate_name
+        FROM checkin c
+        JOIN users u ON c.visitor_id = u.id
+        LEFT JOIN gates g1 ON c.checkin_gate_id = g1.id
+        LEFT JOIN gates g2 ON c.checkout_gate_id = g2.id
+        WHERE c.establishment_id = $1 AND c.check_out_at IS NOT NULL
+        ORDER BY c.check_out_at DESC
+        LIMIT 50
+      `,
+        [establishmentId]
+      );
+
+      res.json({ checkedOutVisitors: checkedOutVisitors.rows });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({
+        message: "Failed to fetch checked-out visitors",
+        error: err.message,
+      });
+    }
+  }
+);
+
+// Send invitation to user by phone number for department access
+router.post(
+  "/requests/invite-department",
+  async (req: express.Request, res: express.Response): Promise<void> => {
+    try {
+      const senderId = req.user?.id;
+      const { userPhone, departmentId } = req.body;
+
+      if (!senderId) {
+        res.status(401).json({ message: "Unauthorized: user id missing" });
+        return;
+      }
+
+      if (!userPhone || !departmentId) {
+        res.status(400).json({
+          message: "userPhone and departmentId are required",
         });
         return;
       }
 
-      // Check if invitation already exists
+      // Parse phone to extract country code and number
+      const phoneStr = userPhone as string;
+      let country_code = "";
+      let phoneNumber = "";
+
+      if (phoneStr.includes(" ")) {
+        [country_code, phoneNumber] = phoneStr.split(" ");
+      } else {
+        country_code = "+91";
+        phoneNumber = phoneStr;
+      }
+
+      // Find the user by country code and phone number
+      const userResult = await pool.query(
+        "SELECT id, phone, country_code FROM users WHERE country_code = $1 AND phone = $2",
+        [country_code, phoneNumber]
+      );
+
+      if (userResult.rows.length === 0) {
+        res.status(404).json({ message: "User not found with this phone number" });
+        return;
+      }
+
+      const recipientId = userResult.rows[0].id;
+
+      // Get department information and verify sender owns the establishment
+      const departmentResult = await pool.query(
+        `SELECT d.id, d.establishment_id, d.name as department_name, e.user_id as owner_id, e.name as establishment_name,
+                sender.firstname as sender_firstname, sender.lastname as sender_lastname
+         FROM departments d 
+         JOIN establishments e ON d.establishment_id = e.id 
+         LEFT JOIN users sender ON e.user_id = sender.id
+         WHERE d.id = $1`,
+        [departmentId]
+      );
+
+      if (departmentResult.rows.length === 0) {
+        res.status(404).json({ message: "Department not found" });
+        return;
+      }
+
+      const department = departmentResult.rows[0];
+      if (department.owner_id !== senderId) {
+        res.status(403).json({
+          message: "You don't have permission to invite users to this department",
+        });
+        return;
+      }
+
+      // Add sender name to department object for notification
+      department.sender_name = `${department.sender_firstname} ${department.sender_lastname}`.trim();
+
+      // Check if invitation already exists for this department
       const existingInvitation = await pool.query(
-        "SELECT gate_dept_id FROM pending_request WHERE user_id = $1 AND type = $2 AND gate_dept_id = $3 AND establishment_id = $4",
-        [user_id, type, target_id, establishment_id]
+        "SELECT id FROM pending_request WHERE recipient_id = $1 AND department_id = $2 AND status = 'pending'",
+        [recipientId, departmentId]
       );
 
       if (existingInvitation.rows.length > 0) {
-        res
-          .status(400)
-          .json({ message: "Invitation already exists for this user" });
+        res.status(400).json({ message: "Invitation already exists for this user" });
         return;
       }
 
-      // Create pending request
-      await pool.query(
-        "INSERT INTO pending_request (user_id, type, gate_dept_id, establishment_id) VALUES ($1, $2, $3, $4)",
-        [user_id, type, target_id, establishment_id]
+      // Create pending request for department
+      const insertResult = await pool.query(
+        "INSERT INTO pending_request (department_id, recipient_id, sender_id, establishment_id, status) VALUES ($1, $2, $3, $4, 'pending')",
+        [departmentId, recipientId, senderId, department.establishment_id]
       );
 
-      res.json({ message: "Invitation sent successfully" });
+      // Send real-time notification via WebSocket
+      if (io) {
+        const notificationData = {
+          type: 'department_invitation_received',
+          message: `You have a new department invitation from ${department.establishment_name}`,
+          departmentId: departmentId,
+          departmentName: department.department_name,
+          establishmentName: department.establishment_name,
+          senderName: department.sender_name,
+        };
+
+        // Send to specific user room
+        io.to(`user_${recipientId}`).emit('notification', notificationData);
+        console.log(`Sent real-time department notification to user ${recipientId}`);
+      }
+
+      res.json({ 
+        message: "Department invitation sent successfully",
+        departmentId: departmentId,
+        departmentName: department.department_name
+      });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({
+        message: "Failed to send department invitation",
+        error: err.message,
+      });
+    }
+  }
+);
+
+// Send invitation to user by phone number for gate access
+router.post(
+  "/requests/invite",
+  async (req: express.Request, res: express.Response): Promise<void> => {
+    try {
+      const senderId = req.user?.id;
+      const { userPhone, gateId } = req.body;
+
+      if (!senderId) {
+        res.status(401).json({ message: "Unauthorized: user id missing" });
+        return;
+      }
+
+      if (!userPhone || !gateId) {
+        res.status(400).json({
+          message: "userPhone and gateId are required",
+        });
+        return;
+      }
+
+      // Parse phone to extract country code and number (same logic as check-user-exists)
+      const phoneStr = userPhone as string;
+      let country_code = "";
+      let phoneNumber = "";
+
+      if (phoneStr.includes(" ")) {
+        [country_code, phoneNumber] = phoneStr.split(" ");
+      } else {
+        // Default fallback
+        country_code = "+91";
+        phoneNumber = phoneStr;
+      }
+
+      // Find the user by country code and phone number
+      const userResult = await pool.query(
+        "SELECT id, phone, country_code FROM users WHERE country_code = $1 AND phone = $2",
+        [country_code, phoneNumber]
+      );
+
+      if (userResult.rows.length === 0) {
+        res.status(404).json({ message: "User not found with this phone number" });
+        return;
+      }
+
+      const recipientId = userResult.rows[0].id;
+
+      // Get gate information and verify sender owns the establishment
+      const gateResult = await pool.query(
+        `SELECT g.id, g.establishment_id, g.name as gate_name, e.user_id as owner_id, e.name as establishment_name,
+                sender.firstname as sender_firstname, sender.lastname as sender_lastname
+         FROM gates g 
+         JOIN establishments e ON g.establishment_id = e.id 
+         LEFT JOIN users sender ON e.user_id = sender.id
+         WHERE g.id = $1`,
+        [gateId]
+      );
+
+      if (gateResult.rows.length === 0) {
+        res.status(404).json({ message: "Gate not found" });
+        return;
+      }
+
+      const gate = gateResult.rows[0];
+      if (gate.owner_id !== senderId) {
+        res.status(403).json({
+          message: "You don't have permission to invite users to this gate",
+        });
+        return;
+      }
+
+      // Add sender name to gate object for notification
+      gate.sender_name = `${gate.sender_firstname} ${gate.sender_lastname}`.trim();
+
+      // Check if invitation already exists (using new table structure)
+      const existingInvitation = await pool.query(
+        "SELECT id FROM pending_request WHERE recipient_id = $1 AND gate_id = $2 AND status = 'pending'",
+        [recipientId, gateId]
+      );
+
+      if (existingInvitation.rows.length > 0) {
+        res.status(400).json({ message: "Invitation already exists for this user" });
+        return;
+      }
+
+      // Create pending request (using new table structure)
+      const insertResult = await pool.query(
+        "INSERT INTO pending_request (gate_id, recipient_id, sender_id, establishment_id, status) VALUES ($1, $2, $3, $4, 'pending')",
+        [gateId, recipientId, senderId, gate.establishment_id]
+      );
+
+      // Send real-time notification via WebSocket
+      if (io) {
+        const notificationData = {
+          type: 'invitation_received',
+          message: `You have a new invitation from ${gate.establishment_name}`,
+          gateId: gateId,
+          gateName: gate.gate_name,
+          establishmentName: gate.establishment_name,
+          senderName: gate.sender_name,
+        };
+
+        // Send to specific user room
+        io.to(`user_${recipientId}`).emit('notification', notificationData);
+        console.log(`Sent real-time notification to user ${recipientId}`);
+      }
+
+      res.json({ 
+        message: "Invitation sent successfully",
+        gateId: gateId,
+        gateName: gate.gate_name
+      });
     } catch (err: any) {
       console.error(err);
       res
@@ -512,6 +1052,11 @@ router.use("/otp", otpRoutes);
 router.use("/departments", departmentsRoutes);
 router.use("/gates", gatesRoutes);
 router.use("/user-department-map", userDepartmentMapRoutes);
+
+// Function to set Socket.IO instance
+export const setSocketIO = (socketIO: Server) => {
+  io = socketIO;
+};
 
 // Add more routes as you build them:
 // router.use('/login', require('./login'));

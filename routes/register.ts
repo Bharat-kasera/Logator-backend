@@ -114,11 +114,12 @@ router.post(
       return;
     }
 
-    // Simple OTP check (replace with real Twilio verification)
+    // TESTING MODE: Hardcoded OTP check (Twilio commented out for testing)
     if (otp !== "123456") {
-      res.status(400).json({ message: "Invalid OTP." });
+      res.status(400).json({ message: "Invalid OTP. Use 123456 for testing." });
       return;
     }
+    console.log("🔍 TESTING MODE: OTP verified successfully for registration:", phone);
 
     const client = await pool.connect();
     try {
@@ -239,11 +240,12 @@ router.post(
       return;
     }
 
-    // Accept any 6-digit OTP for now (replace with real Twilio verification)
-    if (!/^[0-9]{6}$/.test(otp)) {
-      res.status(400).json({ message: "Invalid OTP format" });
+    // TESTING MODE: Accept hardcoded OTP only (Twilio verification commented out)
+    if (otp !== "123456") {
+      res.status(400).json({ message: "Invalid OTP. Use 123456 for testing." });
       return;
     }
+    console.log("🔍 TESTING MODE: OTP verified successfully for login:", phone);
 
     try {
       const { rows } = await pool.query(
