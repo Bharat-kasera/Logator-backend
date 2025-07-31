@@ -7,7 +7,9 @@
     "dev": "nodemon --exec ts-node server.ts",
     "build": "tsc",
     "clean": "rm -rf dist",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "railway:build": "npm run build",
+    "railway:start": "npm start"
   },
   "dependencies": {
     "body-parser": "^1.20.2",

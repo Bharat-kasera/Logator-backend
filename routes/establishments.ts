@@ -129,6 +129,37 @@ router.put(
   }
 );
 
+// GET individual establishment by ID
+router.get(
+  "/:id",
+  async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+    try {
+      const establishmentId = req.params.id;
+      const userId = req.user?.id;
+
+      if (!userId) {
+        res.status(401).json({ message: "Unauthorized: user id missing" });
+        return;
+      }
+
+      const establishment = await knex("establishments")
+        .where("id", establishmentId)
+        .andWhere("user_id", userId)
+        .first();
+
+      if (!establishment) {
+        res.status(404).json({ message: "Establishment not found" });
+        return;
+      }
+
+      res.json(establishment);
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ message: "Failed to fetch establishment" });
+    }
+  }
+);
+
 // GET establishment(s) by user ID (for debugging)
 router.get(
   "/by-user/:userId",

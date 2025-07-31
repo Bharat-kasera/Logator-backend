@@ -7,13 +7,16 @@ dotenv.config();
 
 const router = express.Router();
 
-// Initialize Twilio client
-const client = twilio(
-  process.env.TWILIO_ACCOUNT_SID!,
-  process.env.TWILIO_AUTH_TOKEN!
-);
+// Initialize Twilio client only if credentials are available
+let client: ReturnType<typeof twilio> | null = null;
+if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+  client = twilio(
+    process.env.TWILIO_ACCOUNT_SID,
+    process.env.TWILIO_AUTH_TOKEN
+  );
+}
 
-// Send OTP via Twilio
+// Send OTP via Twilio (with development fallback)
 router.post(
   "/send-otp",
   async (req: Request<{}, any, OTPRequest>, res: Response): Promise<void> => {
@@ -27,19 +30,35 @@ router.post(
     const fullPhone = `${country_code}${phone}`;
 
     try {
-      const verification = await client.verify.v2
-        .services(process.env.TWILIO_VERIFY_SERVICE_SID!)
-        .verifications.create({
-          to: fullPhone,
-          channel: "sms",
-        });
+      // Check if Twilio is configured
+      if (client && process.env.TWILIO_VERIFY_SERVICE_SID) {
+        // Production: Use real Twilio
+        const verification = await client.verify.v2
+          .services(process.env.TWILIO_VERIFY_SERVICE_SID)
+          .verifications.create({
+            to: fullPhone,
+            channel: "sms",
+          });
 
-      console.log("OTP sent successfully:", verification.status);
-      res.json({
-        success: true,
-        status: verification.status,
-        message: "OTP sent successfully",
-      });
+        console.log("OTP sent successfully via Twilio:", verification.status);
+        res.json({
+          success: true,
+          status: verification.status,
+          message: "OTP sent successfully",
+        });
+      } else {
+        // Development: Use mock OTP
+        console.log("🚀 DEVELOPMENT MODE: Mock OTP sent to", fullPhone);
+        console.log("📱 Use OTP: 123456 for login");
+        
+        res.json({
+          success: true,
+          status: "pending",
+          message: "OTP sent successfully (Development Mode - Use 123456)",
+          developmentMode: true,
+          mockOtp: "123456"
+        });
+      }
     } catch (error: any) {
       console.error("Error sending OTP:", error);
       res.status(500).json({
@@ -51,7 +70,7 @@ router.post(
   }
 );
 
-// Verify OTP via Twilio
+// Verify OTP via Twilio (with development fallback)
 router.post(
   "/verify-otp",
   async (req: Request<{}, any, OTPRequest>, res: Response): Promise<void> => {
@@ -67,19 +86,32 @@ router.post(
     const fullPhone = `${country_code}${phone}`;
 
     try {
-      const verificationCheck = await client.verify.v2
-        .services(process.env.TWILIO_VERIFY_SERVICE_SID!)
-        .verificationChecks.create({
-          to: fullPhone,
-          code: otp,
-        });
+      let isValid = false;
+      let status = "denied";
 
-      const isValid = verificationCheck.status === "approved";
+      // Check if Twilio is configured
+      if (client && process.env.TWILIO_VERIFY_SERVICE_SID) {
+        // Production: Use real Twilio verification
+        const verificationCheck = await client.verify.v2
+          .services(process.env.TWILIO_VERIFY_SERVICE_SID)
+          .verificationChecks.create({
+            to: fullPhone,
+            code: otp,
+          });
 
-      console.log("OTP verification result:", verificationCheck.status);
+        isValid = verificationCheck.status === "approved";
+        status = verificationCheck.status;
+        console.log("OTP verification result via Twilio:", status);
+      } else {
+        // Development: Use mock OTP verification
+        isValid = otp === "123456";
+        status = isValid ? "approved" : "denied";
+        console.log("🔍 DEVELOPMENT MODE: OTP verification for", fullPhone, "- OTP:", otp, "- Valid:", isValid);
+      }
+
       res.json({
         success: isValid,
-        status: verificationCheck.status,
+        status: status,
         message: isValid ? "OTP verified successfully" : "Invalid OTP",
       });
     } catch (error: any) {
