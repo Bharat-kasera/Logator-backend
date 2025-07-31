@@ -5,28 +5,21 @@
     "lib": ["es2020", "dom"],
     "outDir": "./dist",
     "rootDir": "./",
-    "strict": true,
+    "strict": false,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
+    "forceConsistentCasingInFileNames": false,
     "moduleResolution": "node",
     "resolveJsonModule": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "typeRoots": ["./node_modules/@types"],
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "noImplicitAny": false,
+    "allowJs": true
   },
   "include": [
-    "**/*.ts",
-    "types/**/*",
-    "services/**/*",
-    "routes/**/*",
-    "middleware/**/*",
-    "utils/**/*",
-    "components/**/*"
+    "**/*.ts"
   ],
-  "exclude": ["node_modules", "dist", "**/*.js"]
+  "exclude": ["node_modules", "dist"]
 }
