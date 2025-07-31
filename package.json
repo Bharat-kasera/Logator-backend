@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "main": "dist/server.js",
   "scripts": {
-    "start": "node dist/server.js",
+    "start": "npx ts-node server.ts",
     "dev": "nodemon --exec ts-node server.ts",
-    "build": "npm run clean && tsc",
+    "build": "echo 'Using ts-node - no compilation needed'",
     "clean": "rm -rf dist && mkdir -p dist",
     "typecheck": "tsc --noEmit",
     "railway:build": "npm run build",
@@ -29,10 +29,10 @@
     "@types/jsonwebtoken": "^9.0.7",
     "@types/pg": "^8.10.1",
     "typescript": "^5.3.3",
-    "knex": "^3.1.0"
+    "knex": "^3.1.0",
+    "ts-node": "^10.9.2"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2",
-    "ts-node": "^10.9.2"
+    "nodemon": "^3.0.2"
   }
 }
