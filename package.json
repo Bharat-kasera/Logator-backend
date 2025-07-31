@@ -5,8 +5,8 @@
   "scripts": {
     "start": "node dist/server.js",
     "dev": "nodemon --exec ts-node server.ts",
-    "build": "tsc",
-    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc",
+    "clean": "rm -rf dist && mkdir -p dist",
     "typecheck": "tsc --noEmit",
     "railway:build": "npm run build",
     "railway:start": "npm start"
