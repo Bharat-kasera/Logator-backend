@@ -96,15 +96,16 @@ router.post(
 
       const currentCount = parseInt(countResult.rows[0].count);
 
-      // Plan-based restrictions: Basic plan (1) allows limited gates
-      let gateLimit = Infinity;
+      // Plan-based restrictions
+      let gateLimit = 10; // Pro and Enterprise establishments default to 10
       if (establishmentPlan === 1) {
         gateLimit = 1; // Basic plan allows only 1 gate
       }
 
       if (currentCount >= gateLimit) {
+        const planName = establishmentPlan === 1 ? 'Basic' : establishmentPlan === 2 ? 'Pro' : 'Enterprise';
         res.status(400).json({
-          message: `Plan limit reached. Basic plan allows only ${gateLimit} gate(s).`,
+          message: `Plan limit reached. ${planName} plan allows only ${gateLimit} gate(s).`,
         });
         return;
       }

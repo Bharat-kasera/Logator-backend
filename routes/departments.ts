@@ -71,15 +71,16 @@ router.post(
 
       const currentCount = parseInt(countResult.rows[0].count);
 
-      // Plan-based restrictions: Basic plan (1) allows only 1 department
-      let departmentLimit = Infinity;
+      // Plan-based restrictions
+      let departmentLimit = 10; // Pro and Enterprise establishments default to 10
       if (establishmentPlan === 1) {
-        departmentLimit = 1;
+        departmentLimit = 1; // Basic plan allows only 1 department
       }
 
       if (currentCount >= departmentLimit) {
+        const planName = establishmentPlan === 1 ? 'Basic' : establishmentPlan === 2 ? 'Pro' : 'Enterprise';
         res.status(400).json({
-          message: `Plan limit reached. Basic plan allows only ${departmentLimit} department(s).`,
+          message: `Plan limit reached. ${planName} plan allows only ${departmentLimit} department(s).`,
         });
         return;
       }

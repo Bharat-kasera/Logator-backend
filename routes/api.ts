@@ -15,11 +15,14 @@ let io: Server;
 
 // Import individual route modules
 import registerRoutes from "./register";
+import companiesRoutes from "./companies";
 import establishmentsRoutes from "./establishments";
 import otpRoutes from "./otp";
 import departmentsRoutes from "./departments";
 import gatesRoutes from "./gates";
 import userDepartmentMapRoutes from "./user_department_map";
+import qrRoutes from "./qr";
+const userRoutes = require("./user");
 
 // User Notifications Endpoints
 
@@ -1047,11 +1050,14 @@ router.post(
 
 // Mount registration routes directly at root
 router.use("/", registerRoutes);
+router.use("/companies", companiesRoutes);
 router.use("/establishments", establishmentsRoutes);
 router.use("/otp", otpRoutes);
+router.use("/qr", qrRoutes);
 router.use("/departments", departmentsRoutes);
 router.use("/gates", gatesRoutes);
 router.use("/user-department-map", userDepartmentMapRoutes);
+router.use("/", userRoutes);
 
 // Function to set Socket.IO instance
 export const setSocketIO = (socketIO: Server) => {

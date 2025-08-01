@@ -79,6 +79,21 @@ router.post(
         user.id,
       ]);
 
+      // Create company from representing field if provided
+      if (representing && representing.trim()) {
+        try {
+          await pool.query(
+            `INSERT INTO companies (user_id, name, uuid, created_at, updated_at)
+             VALUES ($1, $2, uuid_generate_v4(), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+            [user.id, representing.trim()]
+          );
+          console.log(`Company '${representing.trim()}' created for user ${user.id}`);
+        } catch (companyErr: any) {
+          console.log("⚠️ Warning: Failed to create company:", companyErr.message);
+          // Continue with user registration even if company creation fails
+        }
+      }
+
       console.log("User registered successfully:", user);
       res.status(201).json({
         message: "User registered successfully.",
