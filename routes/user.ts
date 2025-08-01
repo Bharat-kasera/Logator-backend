@@ -1,8 +1,9 @@
-const express = require('express');
-const router = express.Router();
-const knex = require('../db/knex'); // Using knex directly
+import express, { Request, Response } from 'express';
+import knex from '../db/knex';
 
-router.post('/update-plan', async (req, res) => {
+const router = express.Router();
+
+router.post('/update-plan', async (req: Request, res: Response): Promise<void> => {
   const { userId, plan } = req.body;
   try {
     await knex('users').where({ id: userId }).update({ plan });
@@ -14,11 +15,12 @@ router.post('/update-plan', async (req, res) => {
 });
 
 // Update user profile endpoint (for Profile.tsx)
-router.post('/update-profile', async (req, res) => {
+router.post('/update-profile', async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
     if (!userId) {
-      return res.status(401).json({ message: 'Unauthorized' });
+      res.status(401).json({ message: 'Unauthorized' });
+      return;
     }
 
     const { firstname, lastname, email, photo_url, representing } = req.body;
@@ -46,11 +48,12 @@ router.post('/update-profile', async (req, res) => {
 });
 
 // Update user profile endpoint (for Settings.tsx)
-router.put('/user/profile', async (req, res) => {
+router.put('/user/profile', async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
     if (!userId) {
-      return res.status(401).json({ message: 'Unauthorized' });
+      res.status(401).json({ message: 'Unauthorized' });
+      return;
     }
 
     const { firstname, lastname, email, phone, country_code } = req.body;
@@ -75,11 +78,12 @@ router.put('/user/profile', async (req, res) => {
 });
 
 // Delete user account endpoint (for Settings.tsx)
-router.delete('/user/delete', async (req, res) => {
+router.delete('/user/delete', async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
     if (!userId) {
-      return res.status(401).json({ message: 'Unauthorized' });
+      res.status(401).json({ message: 'Unauthorized' });
+      return;
     }
 
     // Delete user account (cascade will handle related data)
@@ -92,4 +96,4 @@ router.delete('/user/delete', async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;
