@@ -22,7 +22,7 @@ import departmentsRoutes from "./departments";
 import gatesRoutes from "./gates";
 import userDepartmentMapRoutes from "./user_department_map";
 import qrRoutes from "./qr";
-const userRoutes = require("./user");
+const userRoutes = require("./user.js");
 
 // User Notifications Endpoints
 
