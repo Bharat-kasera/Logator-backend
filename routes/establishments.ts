@@ -66,7 +66,7 @@ router.post(
           name: req.body.name,
           address1: req.body.address1,
           address2: req.body.address2,
-          pincode: req.body.pincode,
+          pincode: req.body.pincode || '000000', // Default pincode if not provided (NOT NULL constraint)
           gst_number: req.body.gst,
           pan_number: req.body.pan,
           logo: req.body.logo,

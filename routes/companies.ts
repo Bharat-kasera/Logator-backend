@@ -442,13 +442,13 @@ router.post("/:id/establishments", async (req: Request, res: Response): Promise<
         name,
         address1,
         address2,
-        pincode,
+        pincode: pincode || '000000', // Default pincode if not provided (NOT NULL constraint)
         gst_number: gst,
         pan_number: pan,
-        logo_url: logo,
+        logo: logo, // Column name is 'logo', not 'logo_url'
         plan: establishmentPlan,
         created_at: new Date(),
-        updated_at: new Date(),
+        // removed updated_at - column doesn't exist in establishments table
       })
       .returning("*");
 
