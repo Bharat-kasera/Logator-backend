@@ -299,7 +299,7 @@ router.get("/:id/dashboard", async (req: Request, res: Response): Promise<void> 
       .first();
 
     // Get pending requests for this company's establishments
-    const pendingRequests = await knex("pending_requests as pr")
+    const pendingRequests = await knex("pending_request as pr")
       .join("departments as d", function() {
         this.on("pr.target_id", "=", "d.id").andOn("pr.type", "=", knex.raw("'D'"));
       })
@@ -309,7 +309,7 @@ router.get("/:id/dashboard", async (req: Request, res: Response): Promise<void> 
       .select("pr.*", "u.firstname", "u.lastname", "c.name as company_name")
       .where("c.id", company.id)
       .union(
-        knex("pending_requests as pr")
+        knex("pending_request as pr")
           .join("gates as g", function() {
             this.on("pr.target_id", "=", "g.id").andOn("pr.type", "=", knex.raw("'G'"));
           })
@@ -509,11 +509,11 @@ router.put("/:id/establishments/:establishmentId", async (req: Request, res: Res
         name,
         address1,
         address2,
-        pincode,
+        pincode: pincode || '000000', // Default pincode if not provided (NOT NULL constraint)
         gst_number: gst,
         pan_number: pan,
-        logo_url: logo,
-        updated_at: new Date(),
+        logo: logo, // Column name is 'logo', not 'logo_url'
+        // removed updated_at - column doesn't exist in establishments table
       })
       .returning("*");
 
@@ -662,7 +662,7 @@ router.get("/:id/analytics", async (req: Request, res: Response): Promise<void> 
       .first();
 
     // Pending requests
-    const pendingRequests = await knex("pending_requests as pr")
+    const pendingRequests = await knex("pending_request as pr")
       .join("departments as d", function() {
         this.on("pr.target_id", "=", "d.id").andOn("pr.type", "=", knex.raw("'D'"));
       })
@@ -712,7 +712,7 @@ router.get("/:id/analytics", async (req: Request, res: Response): Promise<void> 
         total_establishments: parseInt(String(totalEstablishments?.count)) || 0,
         total_gates: parseInt(String(totalGates?.count)) || 0,
         total_departments: parseInt(String(totalDepartments?.count)) || 0,
-        pending_requests: parseInt(String(pendingRequests?.count)) || 0,
+        pending_request: parseInt(String(pendingRequests?.count)) || 0,
         avg_visit_duration: Math.round(parseFloat(String((avgDuration as any)?.avg_minutes)) || 0),
       },
       trends: {
@@ -873,7 +873,7 @@ router.get("/:id/requests", async (req: Request, res: Response): Promise<void> =
     const offset = (page - 1) * limit;
 
     // Build query for requests related to company's establishments
-    let query = knex("pending_requests as pr")
+    let query = knex("pending_request as pr")
       .select(
         "pr.*",
         "u.firstname",
@@ -971,7 +971,7 @@ router.put("/:id/requests/:requestId", async (req: Request, res: Response): Prom
     }
 
     // Get the request and verify it belongs to this company
-    const request = await knex("pending_requests as pr")
+    const request = await knex("pending_request as pr")
       .select("pr.*", "e.company_id")
       .leftJoin("departments as d", function() {
         this.on("pr.target_id", "=", "d.id").andOn("pr.type", "=", knex.raw("'D'"));
@@ -999,7 +999,7 @@ router.put("/:id/requests/:requestId", async (req: Request, res: Response): Prom
     // Update the request status
     const newStatus = action === 'approve' ? 'approved' : 'denied';
     
-    await knex("pending_requests")
+    await knex("pending_request")
       .where("id", requestId)
       .update({
         status: newStatus,
