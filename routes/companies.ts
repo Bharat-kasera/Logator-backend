@@ -413,7 +413,7 @@ router.post("/:id/establishments", async (req: Request, res: Response): Promise<
     }
 
     // Check establishment limit based on user plan
-    const establishmentLimit = userPlan === 1 ? 1 : userPlan === 3 ? 10 : 10; // Basic: 1, Pro/Enterprise: 10
+    const establishmentLimit = userPlan === 3 ? 10 : 1; // Basic & Pro: 1, Enterprise: 10
     
     const existingEstablishments = await knex("establishments")
       .where("company_id", company.id)
@@ -432,7 +432,7 @@ router.post("/:id/establishments", async (req: Request, res: Response): Promise<
     // Determine establishment plan based on user plan
     let establishmentPlan = 1; // Default to Basic
     if (userPlan === 3) establishmentPlan = 2; // Enterprise user gets Pro establishment
-    else if (userPlan === 5) establishmentPlan = 2; // Pro user gets Pro establishment
+    else if (userPlan === 2) establishmentPlan = 2; // Pro user gets Pro establishment
 
     // Create the establishment
     const [establishment] = await knex("establishments")
